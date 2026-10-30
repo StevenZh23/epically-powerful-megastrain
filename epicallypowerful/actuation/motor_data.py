@@ -35,6 +35,19 @@ MOTOR_PARAMS = {
         'gear_ratio': 8,
         'super_type': 'CubeMars'
     },
+    # CubeMars AKE80-8 KV30 driven by mjbots moteus (n1/r4/...) over CAN-FD.
+    # kp/kd limits are moteus kp_scale/kd_scale (unitless), not MIT gains.
+    'AKE80-8-Moteus': {
+        'position_limits': (-12.56, 12.56),
+        'velocity_limits': (-25.0, 25.0),
+        'torque_limits': (-30.0, 30.0),
+        'rated_torque_limits': (-12.0, 12.0),
+        'kp_limits': (0.0, 10.0),
+        'kd_limits': (0.0, 10.0),
+        'pole_pairs': 21,
+        'gear_ratio': 8,
+        'super_type': 'CubeMarsMoteus',
+    },
     'AKE60-8-V3': {
         'position_limits': (-12.56, 12.56),
         'velocity_limits': (-40.0, 40.0),
@@ -249,6 +262,9 @@ def get_motor_details(motor_type):
 
 def cubemars():
     return [motor_key for motor_key in MOTOR_PARAMS.keys() if MOTOR_PARAMS[motor_key]['super_type'] == 'CubeMars']
+
+def cubemars_moteus():
+    return [motor_key for motor_key in MOTOR_PARAMS.keys() if MOTOR_PARAMS[motor_key]['super_type'] == 'CubeMarsMoteus']
 
 def cybergears():
     return [motor_key for motor_key in MOTOR_PARAMS.keys() if MOTOR_PARAMS[motor_key]['super_type'] == 'Robstride']

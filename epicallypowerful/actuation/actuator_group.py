@@ -1,8 +1,9 @@
 from epicallypowerful.actuation.actuator_abc import Actuator
 from epicallypowerful.actuation.cubemars import CubeMars, CubeMarsV3
 from epicallypowerful.actuation.cubemars import CubeMarsServo
+from epicallypowerful.actuation.cubemars import CubeMarsMoteus
 from epicallypowerful.actuation.robstride import Robstride
-from epicallypowerful.actuation.motor_data import MotorData, cubemars, robstrides
+from epicallypowerful.actuation.motor_data import MotorData, cubemars, cubemars_moteus, robstrides
 import can
 from can import CanOperationError
 import time
@@ -24,12 +25,32 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 fh.setFormatter(formatter)
 motorlog.addHandler(fh)
 
-def _load_can_drivers() -> None:
+# moteus-compatible CAN-FD timings (1 Mbps arb / 5 Mbps data, sample-point 0.666)
+_CANFD_IP_LINK = (
+    "sudo /sbin/ip link set can0 txqueuelen 1000 up type can "
+    "bitrate 1000000 dbitrate 5000000 "
+    "sjw 10 dsjw 5 "
+    "sample-point 0.666 dsample-point 0.666 "
+    "restart-ms 1000 fd on"
+)
+_CAN_IP_LINK = "sudo /sbin/ip link set can0 txqueuelen 1000 up type can bitrate 1000000"
+
+
+def _bring_up_can0(fd: bool = False) -> None:
+    os.system("sudo /sbin/ip link set can0 down")
+    os.system(_CANFD_IP_LINK if fd else _CAN_IP_LINK)
+
+
+def _load_can_drivers(fd: bool = False) -> None:
     """Loads and unload the can drivers, then reloads to ensure fresh driver initialization
     This will load the CAN drivers, but then remove them and load them again...
     Trust the process. Loading them alone will not reset the can drivers.
     If they are not reset, the buffer can fill up due to errors and the buffer
     will not properly reset.
+
+    Args:
+        fd: When True, bring ``can0`` up as CAN-FD at moteus timings (1M/5M).
+            Required for :class:`CubeMarsMoteus` / mjbots moteus controllers.
     """
 
     dev_uname = platform.uname()
@@ -47,12 +68,14 @@ def _load_can_drivers() -> None:
         os.system('sudo modprobe can_raw')
         os.system('sudo modprobe mttcan')
 
-        os.system('sudo /sbin/ip link set can0 down')
-        os.system('sudo /sbin/ip link set can0 txqueuelen 1000 up type can bitrate 1000000')
+        _bring_up_can0(fd=fd)
 
     elif 'aarch64' in dev_uname.machine.lower() and ('rpi' in dev_uname.release.lower() or 'raspi' in dev_uname.release.lower() or 'bcm' in dev_uname.release.lower()):
-        os.system('sudo /sbin/ip link set can0 down')
-        os.system('sudo /sbin/ip link set can0 txqueuelen 1000 up type can bitrate 1000000')
+        _bring_up_can0(fd=fd)
+
+    elif fd:
+        # Desktop / USB-CAN-FD / MCP2518fd on other kernels: still try FD bring-up.
+        _bring_up_can0(fd=True)
 
 
 class ActuatorGroup():
@@ -111,9 +134,26 @@ class ActuatorGroup():
         torque_limit_mode: Literal['warn', 'throttle', 'saturate', 'disable', 'silent'] = 'warn',
         torque_rms_window: float=20.0,
     ) -> None:
-        _load_can_drivers()
-        if can_args is None: can_args = {'bustype': 'socketcan', 'channel': 'can0'}
-        self.bus = can.Bus(channel=can_args['channel'], bustype=can_args['bustype'])
+        use_fd = any(getattr(a, "requires_can_fd", False) for a in actuators)
+        if can_args is not None and can_args.get("fd"):
+            use_fd = True
+
+        _load_can_drivers(fd=use_fd)
+        if can_args is None:
+            can_args = {"bustype": "socketcan", "channel": "can0", "fd": use_fd}
+        else:
+            can_args = dict(can_args)
+            can_args.setdefault("bustype", "socketcan")
+            can_args.setdefault("channel", "can0")
+            can_args.setdefault("fd", use_fd)
+
+        bus_kwargs = {
+            "channel": can_args["channel"],
+            "bustype": can_args["bustype"],
+        }
+        if can_args.get("fd"):
+            bus_kwargs["fd"] = True
+        self.bus = can.Bus(**bus_kwargs)
         self.notifier = can.Notifier(self.bus, [])
 
         self.actuators = {}
@@ -550,6 +590,7 @@ class ActuatorGroup():
             * 'AK70-9-V3'
             * 'AK60-6-V3'
             * 'AK10-9-V3'
+            * 'AKE80-8-Moteus'
             * 'CyberGear'
             * 'RS00'
             * 'RS01'
@@ -564,6 +605,7 @@ class ActuatorGroup():
 
 
                 actuators = ActuatorGroup.from_dict({ 1: 'AK80-9', 2: 'AK70-10', 3: 'CyberGear', 4: 'AK10-9-V3', '5': 'RS02' }, invert=[2,4])
+                moteus_group = ActuatorGroup.from_dict({1: 'AKE80-8-Moteus'})
 
         Args:
             actuators (dict[int, str]): A dictionary where the key is the CAN ID and the value is the actuator type.
@@ -581,6 +623,7 @@ class ActuatorGroup():
         """
 
         cubemars_types = cubemars()
+        cubemars_moteus_types = cubemars_moteus()
         robstride_types = robstrides()
         act_list = []
         for a in actuators.keys():
@@ -599,7 +642,11 @@ class ActuatorGroup():
                 inv = True
             else:
                 inv = False
-            if actuators[a] in cubemars_types:
+            if actuators[a] in cubemars_moteus_types:
+                if servomode:
+                    raise ValueError(f"Moteus CubeMars motors do not support servo mode: {actuators[a]}")
+                act_list.append(CubeMarsMoteus(a, actuators[a], invert=inv))
+            elif actuators[a] in cubemars_types:
                 if (servomode):
                     act_list.append(CubeMarsServo(a, actuators[a], invert=inv))
                 elif (v3_mode):
