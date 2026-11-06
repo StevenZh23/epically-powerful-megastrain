@@ -543,6 +543,102 @@ def stream_actuator_data():
     except KeyboardInterrupt:
         print("\nClosing actuators.")
 
+def _stream_actuator_data_canfd_parser():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Stream actuator data over CAN-FD (mjbots moteus / CubeMarsMoteus). "
+            "Brings can0 up at moteus timings (1 Mbps arb / 5 Mbps data)."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--rate", '-r',
+        required=False,
+        type=int,
+        default=200,
+        help="Operating frequency [Hz]",
+    )
+    parser.add_argument(
+        "--actuator-type", '-at',
+        required=False,
+        type=str,
+        default="AKE80-8-Moteus",
+        help="Actuator type (moteus CubeMars types; see actuation.motor_data.cubemars_moteus)",
+    )
+    parser.add_argument(
+        "--actuator-id", '-ai',
+        required=True,
+        type=str,
+        help="Actuator ID (moteus servo CAN ID; multiple comma-separated)",
+    )
+    parser.add_argument(
+        "--channel", '-c',
+        required=False,
+        type=str,
+        default="can0",
+        help="SocketCAN channel",
+    )
+    return parser
+
+def stream_actuator_data_canfd():
+    """Run with command-line shortcut `ep-stream-actuator-canfd [ARGS]`."""
+    parser = _stream_actuator_data_canfd_parser()
+
+    args = parser.parse_args()
+    rate = args.rate
+    actuator_type = args.actuator_type
+    actuator_ids = [int(s) for s in args.actuator_id.replace(" ", "").split(',')]
+    channel = args.channel
+
+    from epicallypowerful.actuation.actuator_group import ActuatorGroup
+    from epicallypowerful.actuation.motor_data import cubemars_moteus
+    from epicallypowerful.toolbox.clocking import TimedLoop
+
+    moteus_types = cubemars_moteus()
+    if actuator_type not in moteus_types:
+        raise SystemExit(
+            f"Actuator type '{actuator_type}' is not a CAN-FD moteus type. "
+            f"Expected one of: {moteus_types}"
+        )
+
+    print(
+        f"Streaming CAN-FD moteus actuator(s) {actuator_ids} "
+        f"as {actuator_type} on {channel} at {rate} Hz"
+    )
+
+    clocking_loop = TimedLoop(rate=rate)
+    initialization_dict = {actuator_id: actuator_type for actuator_id in actuator_ids}
+    actuators = ActuatorGroup.from_dict(
+        initialization_dict,
+        can_args={"bustype": "socketcan", "channel": channel, "fd": True},
+    )
+    print("\n")
+
+    try:
+        while clocking_loop():
+            clear_string = '\033[A\033[A' + len(actuator_ids) * '\033[A'
+            print(clear_string)
+            print(
+                f'| Actuator | Position [rad] | Velocity [rad/s] | Torque [Nm] | '
+                f'Temp [C] | Voltage [V] | Fault |'
+            )
+
+            for can_id in actuator_ids:
+                actuators.set_torque(can_id, 0)
+                act = actuators.actuators[can_id]
+                act_data = act.get_data()
+                voltage = getattr(act, "voltage", 0.0)
+                fault = getattr(act, "fault_code", getattr(act_data, "error_code", 0))
+                temp = act.get_temperature()
+                print(
+                    f'| {int(can_id):^8} | {act_data.current_position:^14.2f} | '
+                    f'{act_data.current_velocity:^16.2f} | {act_data.current_torque:^11.2f} | '
+                    f'{temp:^8.1f} | {voltage:^11.1f} | {int(fault):^5} |'
+                )
+
+    except KeyboardInterrupt:
+        print("\nClosing actuators.")
+
 def _impedance_control_actuator_parser():
     parser = argparse.ArgumentParser(
         description="Run impedance controller on an actuator",

@@ -62,6 +62,12 @@ Epically Powerful also includes a few cli tools to quickly test your system and 
 
 .. sphinx_argparse_cli::
     :module: epicallypowerful.toolbox.cli
+    :func: _stream_actuator_data_canfd_parser
+    :prog: ep-stream-actuator-canfd
+    :title: Stream Actuator Data (CAN-FD / moteus)
+
+.. sphinx_argparse_cli::
+    :module: epicallypowerful.toolbox.cli
     :func: _impedance_control_actuator_parser
     :prog: ep-sample-impedance-ctrl
     :title: Impedance Control Example

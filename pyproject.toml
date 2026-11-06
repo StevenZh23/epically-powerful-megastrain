@@ -56,6 +56,7 @@ ep-stream-microstrain-imu = "epicallypowerful.toolbox.cli:stream_microstrain_imu
 ep-stream-mpu9250-imu = "epicallypowerful.toolbox.cli:stream_mpu9250_imu_data"
 ep-stream-open-imu = "epicallypowerful.toolbox.cli:stream_open_imu_data"
 ep-stream-actuator = "epicallypowerful.toolbox.cli:stream_actuator_data"
+ep-stream-actuator-canfd = "epicallypowerful.toolbox.cli:stream_actuator_data_canfd"
 ep-sample-impedance-ctrl = "epicallypowerful.toolbox.cli:impedance_control_actuator"
 ep-sample-position-ctrl = "epicallypowerful.toolbox.cli:position_control_actuator"
 ep-sample-imu-ctrl = "epicallypowerful.toolbox.cli:imu_control_actuator"
